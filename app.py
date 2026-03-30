@@ -2,340 +2,509 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import numpy as np
 
-# -----------------------------
-# PAGE CONFIG
-# -----------------------------
+# ── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Football Player Analytics Dashboard",
+    page_title="Premier League 2020-21 Dashboard",
     page_icon="⚽",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("⚽ Football Player Analytics Dashboard")
-st.markdown("Analyze player performance, club statistics, goals, assists, passing, defending, and more.")
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .main { background-color: #0e1117; }
+    .block-container { padding-top: 1rem; }
+    .metric-card {
+        background: linear-gradient(135deg, #1a1f2e, #252b3b);
+        border: 1px solid #3a3f52;
+        border-radius: 12px;
+        padding: 18px 20px;
+        text-align: center;
+    }
+    .metric-value { font-size: 2rem; font-weight: 700; color: #00d4aa; }
+    .metric-label { font-size: 0.85rem; color: #888; margin-top: 4px; }
+    .section-header {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #e0e0e0;
+        border-left: 4px solid #00d4aa;
+        padding-left: 10px;
+        margin: 20px 0 10px 0;
+    }
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #1a1f2e, #252b3b);
+        border: 1px solid #3a3f52;
+        border-radius: 12px;
+        padding: 12px 16px;
+    }
+    div[data-testid="stMetric"] label { color: #888 !important; }
+    div[data-testid="stMetric"] div { color: #00d4aa !important; font-size: 1.6rem !important; }
+</style>
+""", unsafe_allow_html=True)
 
-# -----------------------------
-# LOAD DATA
-# -----------------------------
+# ── Load data ─────────────────────────────────────────────────────────────────
 @st.cache_data
 def load_data():
-    # Change the file path if needed
-    file_path = "dataset - 2020-09-24.csv"
-    df = pd.read_csv(file_path)
+    df = pd.read_csv("dataset_-_2020-09-24.csv")
+    # Clean percentage columns
+    for col in ["Tackle success %", "Cross accuracy %"]:
+        df[col] = pd.to_numeric(df[col].astype(str).str.replace("%", ""), errors="coerce")
+    df["Club"] = df["Club"].str.replace("-", " ")
     return df
 
 df = load_data()
 
-# -----------------------------
-# DATA CLEANING
-# -----------------------------
-numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-for col in numeric_cols:
-    df[col] = pd.to_numeric(df[col], errors="coerce")
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/en/f/f2/Premier_League_Logo.svg", width=160)
+    st.markdown("## 🔍 Filters")
 
-df["Age"] = pd.to_numeric(df["Age"], errors="coerce")
-df["Appearances"] = pd.to_numeric(df["Appearances"], errors="coerce")
-df["Goals"] = pd.to_numeric(df["Goals"], errors="coerce")
-df["Assists"] = pd.to_numeric(df["Assists"], errors="coerce")
-df["Passes"] = pd.to_numeric(df["Passes"], errors="coerce")
-df["Tackles"] = pd.to_numeric(df["Tackles"], errors="coerce")
-df["Shots on target"] = pd.to_numeric(df["Shots on target"], errors="coerce")
-df["Saves"] = pd.to_numeric(df["Saves"], errors="coerce")
-df["Clean sheets"] = pd.to_numeric(df["Clean sheets"], errors="coerce")
+    clubs = ["All Clubs"] + sorted(df["Club"].unique().tolist())
+    selected_club = st.selectbox("Club", clubs)
 
-# -----------------------------
-# SIDEBAR FILTERS
-# -----------------------------
-st.sidebar.header("🔍 Filter Players")
+    positions = ["All Positions"] + sorted(df["Position"].unique().tolist())
+    selected_pos = st.selectbox("Position", positions)
 
-clubs = sorted(df["Club"].dropna().unique().tolist())
-positions = sorted(df["Position"].dropna().unique().tolist())
-nationalities = sorted(df["Nationality"].dropna().unique().tolist())
+    min_apps, max_apps = int(df["Appearances"].min()), int(df["Appearances"].max())
+    app_range = st.slider("Min Appearances", min_apps, max_apps, 5)
 
-selected_clubs = st.sidebar.multiselect("Select Club(s)", clubs, default=clubs)
-selected_positions = st.sidebar.multiselect("Select Position(s)", positions, default=positions)
-selected_nationalities = st.sidebar.multiselect("Select Nationality(s)", nationalities, default=nationalities)
+    st.markdown("---")
+    st.markdown("**Season:** 2020–21")
+    st.markdown("**Players:** 571 | **Clubs:** 20")
+    st.markdown("*Premier League Stats*")
 
-min_age = int(df["Age"].min()) if df["Age"].notna().any() else 16
-max_age = int(df["Age"].max()) if df["Age"].notna().any() else 45
+# ── Filter data ───────────────────────────────────────────────────────────────
+filtered = df.copy()
+if selected_club != "All Clubs":
+    filtered = filtered[filtered["Club"] == selected_club]
+if selected_pos != "All Positions":
+    filtered = filtered[filtered["Position"] == selected_pos]
+filtered = filtered[filtered["Appearances"] >= app_range]
 
-age_range = st.sidebar.slider("Select Age Range", min_age, max_age, (min_age, max_age))
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("# ⚽ Premier League 2020–21 Dashboard")
+st.markdown(f"Showing **{len(filtered)}** players | Club: **{selected_club}** | Position: **{selected_pos}** | Min Appearances: **{app_range}**")
+st.divider()
 
-filtered_df = df[
-    (df["Club"].isin(selected_clubs)) &
-    (df["Position"].isin(selected_positions)) &
-    (df["Nationality"].isin(selected_nationalities)) &
-    (df["Age"].between(age_range[0], age_range[1], inclusive="both"))
-].copy()
+# ── KPI Metrics ───────────────────────────────────────────────────────────────
+c1, c2, c3, c4, c5 = st.columns(5)
+c1.metric("🏟️ Players", len(filtered))
+c2.metric("⚽ Total Goals", int(filtered["Goals"].sum()))
+c3.metric("🎯 Total Assists", int(filtered["Assists"].sum()))
+c4.metric("🟨 Yellow Cards", int(filtered["Yellow cards"].sum()))
+c5.metric("🟥 Red Cards", int(filtered["Red cards"].sum()))
 
-# -----------------------------
-# KPIs
-# -----------------------------
-st.subheader("📌 Key Performance Indicators")
+st.divider()
 
-col1, col2, col3, col4, col5 = st.columns(5)
+# ── Tab layout ────────────────────────────────────────────────────────────────
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "⚽ Attacking", "🛡️ Defending", "🔄 Passing", "👤 Player Explorer"])
 
-col1.metric("Total Players", len(filtered_df))
-col2.metric("Total Clubs", filtered_df["Club"].nunique())
-col3.metric("Total Goals", int(filtered_df["Goals"].fillna(0).sum()))
-col4.metric("Total Assists", int(filtered_df["Assists"].fillna(0).sum()))
-col5.metric("Avg Age", round(filtered_df["Age"].mean(), 1) if not filtered_df.empty else 0)
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 — OVERVIEW
+# ─────────────────────────────────────────────────────────────────────────────
+with tab1:
+    col1, col2 = st.columns(2)
 
-# -----------------------------
-# TOP PLAYERS TABLE
-# -----------------------------
-st.subheader("🏅 Top Players")
-
-sort_option = st.selectbox(
-    "Sort players by",
-    ["Goals", "Assists", "Passes", "Tackles", "Shots on target", "Saves", "Clean sheets", "Appearances"]
-)
-
-top_players = filtered_df.sort_values(by=sort_option, ascending=False).head(15)
-
-st.dataframe(
-    top_players[
-        [
-            "Name", "Club", "Position", "Nationality", "Age",
-            "Appearances", "Goals", "Assists", "Passes", "Tackles",
-            "Shots on target", "Saves", "Clean sheets"
-        ]
-    ],
-    use_container_width=True
-)
-
-# -----------------------------
-# CHARTS ROW 1
-# -----------------------------
-st.subheader("📊 Club & Player Insights")
-
-c1, c2 = st.columns(2)
-
-with c1:
-    club_goals = (
-        filtered_df.groupby("Club", as_index=False)["Goals"]
-        .sum()
-        .sort_values("Goals", ascending=False)
-        .head(10)
-    )
-    fig_club_goals = px.bar(
-        club_goals,
-        x="Club",
-        y="Goals",
-        title="Top 10 Clubs by Total Goals",
-        text_auto=True
-    )
-    fig_club_goals.update_layout(xaxis_title="Club", yaxis_title="Goals")
-    st.plotly_chart(fig_club_goals, use_container_width=True)
-
-with c2:
-    pos_goals = (
-        filtered_df.groupby("Position", as_index=False)["Goals"]
-        .sum()
-        .sort_values("Goals", ascending=False)
-    )
-    fig_pos_goals = px.pie(
-        pos_goals,
-        names="Position",
-        values="Goals",
-        title="Goals Contribution by Position"
-    )
-    st.plotly_chart(fig_pos_goals, use_container_width=True)
-
-# -----------------------------
-# CHARTS ROW 2
-# -----------------------------
-c3, c4 = st.columns(2)
-
-with c3:
-    top_scorers = filtered_df.sort_values("Goals", ascending=False).head(10)
-    fig_top_scorers = px.bar(
-        top_scorers,
-        x="Name",
-        y="Goals",
-        color="Club",
-        title="Top 10 Goal Scorers",
-        text_auto=True
-    )
-    fig_top_scorers.update_layout(xaxis_title="Player", yaxis_title="Goals")
-    st.plotly_chart(fig_top_scorers, use_container_width=True)
-
-with c4:
-    top_assists = filtered_df.sort_values("Assists", ascending=False).head(10)
-    fig_top_assists = px.bar(
-        top_assists,
-        x="Name",
-        y="Assists",
-        color="Club",
-        title="Top 10 Players by Assists",
-        text_auto=True
-    )
-    fig_top_assists.update_layout(xaxis_title="Player", yaxis_title="Assists")
-    st.plotly_chart(fig_top_assists, use_container_width=True)
-
-# -----------------------------
-# CHARTS ROW 3
-# -----------------------------
-c5, c6 = st.columns(2)
-
-with c5:
-    scatter_df = filtered_df.dropna(subset=["Goals", "Assists", "Appearances"])
-    fig_scatter = px.scatter(
-        scatter_df,
-        x="Goals",
-        y="Assists",
-        size="Appearances",
-        color="Position",
-        hover_data=["Name", "Club"],
-        title="Goals vs Assists"
-    )
-    st.plotly_chart(fig_scatter, use_container_width=True)
-
-with c6:
-    age_distribution = px.histogram(
-        filtered_df,
-        x="Age",
-        nbins=15,
-        title="Player Age Distribution"
-    )
-    age_distribution.update_layout(xaxis_title="Age", yaxis_title="Count")
-    st.plotly_chart(age_distribution, use_container_width=True)
-
-# -----------------------------
-# CHARTS ROW 4
-# -----------------------------
-st.subheader("🛡️ Defensive & Passing Analysis")
-
-c7, c8 = st.columns(2)
-
-with c7:
-    top_defenders = filtered_df.sort_values("Tackles", ascending=False).head(10)
-    fig_tackles = px.bar(
-        top_defenders,
-        x="Name",
-        y="Tackles",
-        color="Club",
-        title="Top 10 Players by Tackles",
-        text_auto=True
-    )
-    fig_tackles.update_layout(xaxis_title="Player", yaxis_title="Tackles")
-    st.plotly_chart(fig_tackles, use_container_width=True)
-
-with c8:
-    top_passers = filtered_df.sort_values("Passes", ascending=False).head(10)
-    fig_passes = px.bar(
-        top_passers,
-        x="Name",
-        y="Passes",
-        color="Club",
-        title="Top 10 Players by Passes",
-        text_auto=True
-    )
-    fig_passes.update_layout(xaxis_title="Player", yaxis_title="Passes")
-    st.plotly_chart(fig_passes, use_container_width=True)
-
-# -----------------------------
-# GOALKEEPER SECTION
-# -----------------------------
-st.subheader("🧤 Goalkeeper Performance")
-
-goalkeepers = filtered_df[filtered_df["Position"].str.contains("Goalkeeper", case=False, na=False)].copy()
-
-if not goalkeepers.empty:
-    g1, g2 = st.columns(2)
-
-    with g1:
-        top_saves = goalkeepers.sort_values("Saves", ascending=False).head(10)
-        fig_saves = px.bar(
-            top_saves,
-            x="Name",
-            y="Saves",
-            color="Club",
-            title="Top Goalkeepers by Saves",
-            text_auto=True
+    with col1:
+        st.markdown('<div class="section-header">Goals by Club</div>', unsafe_allow_html=True)
+        club_goals = filtered.groupby("Club")["Goals"].sum().sort_values(ascending=False).reset_index()
+        fig = px.bar(
+            club_goals, x="Goals", y="Club", orientation="h",
+            color="Goals", color_continuous_scale="teal",
+            template="plotly_dark"
         )
-        st.plotly_chart(fig_saves, use_container_width=True)
-
-    with g2:
-        top_clean_sheets = goalkeepers.sort_values("Clean sheets", ascending=False).head(10)
-        fig_clean = px.bar(
-            top_clean_sheets,
-            x="Name",
-            y="Clean sheets",
-            color="Club",
-            title="Top Goalkeepers by Clean Sheets",
-            text_auto=True
+        fig.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
         )
-        st.plotly_chart(fig_clean, use_container_width=True)
-else:
-    st.info("No goalkeepers found for the selected filters.")
+        st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------
-# PLAYER COMPARISON
-# -----------------------------
-st.subheader("⚔️ Player Comparison")
+    with col2:
+        st.markdown('<div class="section-header">Player Distribution by Position</div>', unsafe_allow_html=True)
+        pos_counts = filtered["Position"].value_counts().reset_index()
+        pos_counts.columns = ["Position", "Count"]
+        colors = ["#00d4aa", "#4ecdc4", "#44a1a0", "#247b7b"]
+        fig2 = px.pie(
+            pos_counts, names="Position", values="Count",
+            color_discrete_sequence=colors, hole=0.5, template="plotly_dark"
+        )
+        fig2.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=10, b=0), height=420,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.2)
+        )
+        st.plotly_chart(fig2, use_container_width=True)
 
-player_names = filtered_df["Name"].dropna().unique().tolist()
+    col3, col4 = st.columns(2)
 
-if len(player_names) >= 2:
-    p1, p2 = st.columns(2)
+    with col3:
+        st.markdown('<div class="section-header">Age Distribution</div>', unsafe_allow_html=True)
+        fig3 = px.histogram(
+            filtered, x="Age", nbins=20, color_discrete_sequence=["#00d4aa"],
+            template="plotly_dark"
+        )
+        fig3.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=10, b=0), height=300,
+            bargap=0.05
+        )
+        st.plotly_chart(fig3, use_container_width=True)
 
-    with p1:
-        player_1 = st.selectbox("Select Player 1", player_names, index=0)
+    with col4:
+        st.markdown('<div class="section-header">Top Nationalities</div>', unsafe_allow_html=True)
+        top_nat = filtered["Nationality"].value_counts().head(10).reset_index()
+        top_nat.columns = ["Nationality", "Count"]
+        fig4 = px.bar(
+            top_nat, x="Count", y="Nationality", orientation="h",
+            color="Count", color_continuous_scale="teal", template="plotly_dark"
+        )
+        fig4.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=300, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig4, use_container_width=True)
 
-    with p2:
-        player_2 = st.selectbox("Select Player 2", player_names, index=1)
+    st.markdown('<div class="section-header">Wins vs Losses by Club</div>', unsafe_allow_html=True)
+    wl = filtered.groupby("Club")[["Wins", "Losses"]].max().reset_index().sort_values("Wins", ascending=False)
+    fig5 = go.Figure()
+    fig5.add_trace(go.Bar(name="Wins", x=wl["Club"], y=wl["Wins"], marker_color="#00d4aa"))
+    fig5.add_trace(go.Bar(name="Losses", x=wl["Club"], y=wl["Losses"], marker_color="#e05c5c"))
+    fig5.update_layout(
+        barmode="group", template="plotly_dark",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=10, b=0), height=350,
+        legend=dict(orientation="h", yanchor="top", y=1.1, xanchor="right", x=1)
+    )
+    st.plotly_chart(fig5, use_container_width=True)
 
-    row1 = filtered_df[filtered_df["Name"] == player_1].iloc[0]
-    row2 = filtered_df[filtered_df["Name"] == player_2].iloc[0]
 
-    comparison_metrics = ["Goals", "Assists", "Passes", "Tackles", "Shots on target", "Appearances"]
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 — ATTACKING
+# ─────────────────────────────────────────────────────────────────────────────
+with tab2:
+    col1, col2 = st.columns(2)
 
-    radar_df = pd.DataFrame({
-        "Metric": comparison_metrics,
-        player_1: [row1.get(m, 0) if pd.notna(row1.get(m, 0)) else 0 for m in comparison_metrics],
-        player_2: [row2.get(m, 0) if pd.notna(row2.get(m, 0)) else 0 for m in comparison_metrics],
-    })
+    with col1:
+        st.markdown('<div class="section-header">Top 15 Goal Scorers</div>', unsafe_allow_html=True)
+        top_scorers = filtered.nlargest(15, "Goals")[["Name", "Club", "Goals", "Assists"]]
+        fig = px.bar(
+            top_scorers, x="Goals", y="Name", orientation="h",
+            color="Goals", color_continuous_scale="teal",
+            hover_data=["Club", "Assists"], template="plotly_dark"
+        )
+        fig.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.markdown('<div class="section-header">Top 15 Assist Providers</div>', unsafe_allow_html=True)
+        top_assists = filtered.nlargest(15, "Assists")[["Name", "Club", "Assists", "Goals"]]
+        fig2 = px.bar(
+            top_assists, x="Assists", y="Name", orientation="h",
+            color="Assists", color_continuous_scale="purples",
+            hover_data=["Club", "Goals"], template="plotly_dark"
+        )
+        fig2.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown('<div class="section-header">Goals vs Shots on Target</div>', unsafe_allow_html=True)
+        att = filtered[filtered["Shots on target"].notna() & (filtered["Goals"] > 0)]
+        fig3 = px.scatter(
+            att, x="Shots on target", y="Goals", color="Position",
+            hover_data=["Name", "Club"], size="Goals",
+            color_discrete_sequence=px.colors.qualitative.Vivid,
+            template="plotly_dark"
+        )
+        fig3.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=10, b=0), height=340
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+    with col4:
+        st.markdown('<div class="section-header">Goal Breakdown by Type</div>', unsafe_allow_html=True)
+        goal_types = {
+            "Right Foot": filtered["Goals with right foot"].sum(),
+            "Left Foot": filtered["Goals with left foot"].sum(),
+            "Headed": filtered["Headed goals"].sum(),
+            "Penalties": filtered["Penalties scored"].sum(),
+            "Freekicks": filtered["Freekicks scored"].sum(),
+        }
+        gt_df = pd.DataFrame(list(goal_types.items()), columns=["Type", "Goals"])
+        fig4 = px.pie(
+            gt_df, names="Type", values="Goals", hole=0.4,
+            color_discrete_sequence=px.colors.sequential.Teal,
+            template="plotly_dark"
+        )
+        fig4.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=10, b=0), height=340,
+            legend=dict(orientation="h", y=-0.2)
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+
+    st.markdown('<div class="section-header">Shooting Accuracy % — Top Players (min 20 shots)</div>', unsafe_allow_html=True)
+    shooters = filtered[filtered["Shots"] >= 20].nlargest(20, "Shooting accuracy %")[["Name", "Club", "Shooting accuracy %", "Goals", "Shots"]]
+    fig5 = px.bar(
+        shooters, x="Shooting accuracy %", y="Name", orientation="h",
+        color="Shooting accuracy %", color_continuous_scale="greens",
+        hover_data=["Club", "Goals", "Shots"], template="plotly_dark"
+    )
+    fig5.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+        height=420, yaxis=dict(categoryorder="total ascending")
+    )
+    st.plotly_chart(fig5, use_container_width=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 — DEFENDING
+# ─────────────────────────────────────────────────────────────────────────────
+with tab3:
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown('<div class="section-header">Top Tacklers</div>', unsafe_allow_html=True)
+        tacklers = filtered[filtered["Tackles"].notna()].nlargest(15, "Tackles")[["Name", "Club", "Tackles", "Tackle success %"]]
+        fig = px.bar(
+            tacklers, x="Tackles", y="Name", orientation="h",
+            color="Tackles", color_continuous_scale="blues",
+            hover_data=["Club", "Tackle success %"], template="plotly_dark"
+        )
+        fig.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.markdown('<div class="section-header">Most Interceptions</div>', unsafe_allow_html=True)
+        intercept = filtered[filtered["Interceptions"].notna()].nlargest(15, "Interceptions")[["Name", "Club", "Interceptions", "Clearances"]]
+        fig2 = px.bar(
+            intercept, x="Interceptions", y="Name", orientation="h",
+            color="Interceptions", color_continuous_scale="reds",
+            hover_data=["Club", "Clearances"], template="plotly_dark"
+        )
+        fig2.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown('<div class="section-header">Clean Sheets by Club</div>', unsafe_allow_html=True)
+        cs = filtered.groupby("Club")["Clean sheets"].max().sort_values(ascending=False).reset_index()
+        fig3 = px.bar(
+            cs, x="Clean sheets", y="Club", orientation="h",
+            color="Clean sheets", color_continuous_scale="blues", template="plotly_dark"
+        )
+        fig3.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=400, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+    with col4:
+        st.markdown('<div class="section-header">Cards by Club</div>', unsafe_allow_html=True)
+        cards = filtered.groupby("Club")[["Yellow cards", "Red cards"]].sum().reset_index().sort_values("Yellow cards", ascending=False)
+        fig4 = go.Figure()
+        fig4.add_trace(go.Bar(name="Yellow", x=cards["Club"], y=cards["Yellow cards"], marker_color="#f0c040"))
+        fig4.add_trace(go.Bar(name="Red", x=cards["Club"], y=cards["Red cards"], marker_color="#e05c5c"))
+        fig4.update_layout(
+            barmode="stack", template="plotly_dark",
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=10, b=0), height=400,
+            xaxis_tickangle=-40,
+            legend=dict(orientation="h", y=1.1, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+
+    st.markdown('<div class="section-header">Aerial Battles — Won vs Lost (Top 15 Players)</div>', unsafe_allow_html=True)
+    aerial = filtered[filtered["Aerial battles won"].notna()].nlargest(15, "Aerial battles won")[["Name", "Club", "Aerial battles won", "Aerial battles lost"]]
+    fig5 = go.Figure()
+    fig5.add_trace(go.Bar(name="Won", x=aerial["Name"], y=aerial["Aerial battles won"], marker_color="#00d4aa"))
+    fig5.add_trace(go.Bar(name="Lost", x=aerial["Name"], y=aerial["Aerial battles lost"], marker_color="#e05c5c"))
+    fig5.update_layout(
+        barmode="group", template="plotly_dark",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=10, b=0), height=340,
+        xaxis_tickangle=-35,
+        legend=dict(orientation="h", y=1.1, xanchor="right", x=1)
+    )
+    st.plotly_chart(fig5, use_container_width=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 4 — PASSING
+# ─────────────────────────────────────────────────────────────────────────────
+with tab4:
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown('<div class="section-header">Most Passes (Top 15)</div>', unsafe_allow_html=True)
+        passers = filtered.nlargest(15, "Passes")[["Name", "Club", "Passes", "Passes per match", "Big chances created"]]
+        fig = px.bar(
+            passers, x="Passes", y="Name", orientation="h",
+            color="Passes", color_continuous_scale="purples",
+            hover_data=["Club", "Passes per match"], template="plotly_dark"
+        )
+        fig.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.markdown('<div class="section-header">Big Chances Created (Top 15)</div>', unsafe_allow_html=True)
+        creators = filtered[filtered["Big chances created"].notna()].nlargest(15, "Big chances created")[["Name", "Club", "Big chances created", "Assists"]]
+        fig2 = px.bar(
+            creators, x="Big chances created", y="Name", orientation="h",
+            color="Big chances created", color_continuous_scale="oranges",
+            hover_data=["Club", "Assists"], template="plotly_dark"
+        )
+        fig2.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=420, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        st.markdown('<div class="section-header">Passes per Match by Position</div>', unsafe_allow_html=True)
+        fig3 = px.box(
+            filtered[filtered["Passes per match"].notna()],
+            x="Position", y="Passes per match",
+            color="Position", color_discrete_sequence=px.colors.qualitative.Vivid,
+            template="plotly_dark"
+        )
+        fig3.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=0, r=0, t=10, b=0), height=340, showlegend=False
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+    with col4:
+        st.markdown('<div class="section-header">Total Crosses by Club (Top 10)</div>', unsafe_allow_html=True)
+        crosses = filtered.groupby("Club")["Crosses"].sum().nlargest(10).reset_index()
+        fig4 = px.bar(
+            crosses, x="Crosses", y="Club", orientation="h",
+            color="Crosses", color_continuous_scale="teal", template="plotly_dark"
+        )
+        fig4.update_layout(
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+            coloraxis_showscale=False, margin=dict(l=0, r=0, t=10, b=0),
+            height=340, yaxis=dict(categoryorder="total ascending")
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+
+    st.markdown('<div class="section-header">Passes vs Assists Scatter (All Players)</div>', unsafe_allow_html=True)
+    pass_df = filtered[filtered["Passes"] > 0]
+    fig5 = px.scatter(
+        pass_df, x="Passes", y="Assists", color="Position",
+        hover_data=["Name", "Club", "Passes per match"],
+        color_discrete_sequence=px.colors.qualitative.Vivid,
+        template="plotly_dark", opacity=0.75
+    )
+    fig5.update_layout(
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(l=0, r=0, t=10, b=0), height=360
+    )
+    st.plotly_chart(fig5, use_container_width=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 5 — PLAYER EXPLORER
+# ─────────────────────────────────────────────────────────────────────────────
+with tab5:
+    st.markdown('<div class="section-header">🔎 Search & Compare Players</div>', unsafe_allow_html=True)
+
+    search = st.text_input("Search player name", "")
+    player_df = filtered.copy()
+    if search:
+        player_df = player_df[player_df["Name"].str.contains(search, case=False, na=False)]
+
+    sort_by = st.selectbox("Sort by", ["Goals", "Assists", "Passes", "Tackles", "Appearances", "Age"])
+    player_df = player_df.sort_values(sort_by, ascending=False)
+
+    display_cols = ["Name", "Club", "Position", "Age", "Nationality", "Appearances", "Goals", "Assists", "Passes", "Yellow cards", "Red cards"]
+    st.dataframe(
+        player_df[display_cols].reset_index(drop=True),
+        use_container_width=True, height=350
+    )
+
+    st.divider()
+    st.markdown('<div class="section-header">📊 Radar Chart — Player Comparison</div>', unsafe_allow_html=True)
+
+    all_names = sorted(df["Name"].unique().tolist())
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        player1 = st.selectbox("Player 1", all_names, index=0)
+    with col_p2:
+        player2 = st.selectbox("Player 2", all_names, index=min(1, len(all_names)-1))
+
+    radar_cols = ["Goals", "Assists", "Passes per match", "Tackles", "Interceptions", "Aerial battles won", "Shots on target", "Big chances created"]
+
+    def get_radar_values(name, cols):
+        row = df[df["Name"] == name][cols].iloc[0]
+        return row.fillna(0).tolist()
+
+    p1_vals = get_radar_values(player1, radar_cols)
+    p2_vals = get_radar_values(player2, radar_cols)
+
+    # Normalize per column max
+    maxes = [max(df[c].max(), 1) for c in radar_cols]
+    p1_norm = [v / m * 100 for v, m in zip(p1_vals, maxes)]
+    p2_norm = [v / m * 100 for v, m in zip(p2_vals, maxes)]
 
     fig_radar = go.Figure()
-
     fig_radar.add_trace(go.Scatterpolar(
-        r=radar_df[player_1],
-        theta=radar_df["Metric"],
-        fill='toself',
-        name=player_1
+        r=p1_norm + [p1_norm[0]], theta=radar_cols + [radar_cols[0]],
+        fill="toself", name=player1, line_color="#00d4aa", fillcolor="rgba(0,212,170,0.2)"
     ))
-
     fig_radar.add_trace(go.Scatterpolar(
-        r=radar_df[player_2],
-        theta=radar_df["Metric"],
-        fill='toself',
-        name=player_2
+        r=p2_norm + [p2_norm[0]], theta=radar_cols + [radar_cols[0]],
+        fill="toself", name=player2, line_color="#e05c5c", fillcolor="rgba(224,92,92,0.2)"
     ))
-
     fig_radar.update_layout(
-        polar=dict(radialaxis=dict(visible=True)),
-        title="Player Comparison Radar Chart"
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)",
+            radialaxis=dict(visible=True, range=[0, 100], tickfont=dict(color="#888"), gridcolor="#333"),
+            angularaxis=dict(tickfont=dict(color="#ccc"), gridcolor="#333")
+        ),
+        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=-0.1, xanchor="center", x=0.5),
+        height=480, margin=dict(l=60, r=60, t=20, b=60)
     )
-
     st.plotly_chart(fig_radar, use_container_width=True)
-else:
-    st.warning("Not enough players available for comparison.")
 
-# -----------------------------
-# RAW DATA
-# -----------------------------
-with st.expander("📂 View Raw Data"):
-    st.dataframe(filtered_df, use_container_width=True)
-
-# -----------------------------
-# DOWNLOAD FILTERED DATA
-# -----------------------------
-csv = filtered_df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    label="⬇️ Download Filtered Data",
-    data=csv,
-    file_name="filtered_football_players.csv",
-    mime="text/csv"
-)
+    # Raw stats side-by-side
+    st.markdown('<div class="section-header">Raw Stats Comparison</div>', unsafe_allow_html=True)
+    p1_row = df[df["Name"] == player1][["Goals","Assists","Appearances","Passes","Tackles","Interceptions","Yellow cards","Red cards","Saves"]].iloc[0]
+    p2_row = df[df["Name"] == player2][["Goals","Assists","Appearances","Passes","Tackles","Interceptions","Yellow cards","Red cards","Saves"]].iloc[0]
+    comp = pd.DataFrame({"Stat": p1_row.index, player1: p1_row.values, player2: p2_row.values})
+    st.dataframe(comp.set_index("Stat"), use_container_width=True)
